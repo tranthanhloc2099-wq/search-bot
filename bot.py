@@ -1,206 +1,299 @@
 """
-MIX DATA SEARCH BOT - Hoàn chỉnh
+MIX DATA SEARCH BOT PRO - Tự động tìm kiếm đa nguồn
 Chức năng:
-- Yêu cầu user reply vào tin nhắn để nhập từ khóa
-- Tìm kiếm trên nhiều nguồn dữ liệu (user, product, document, domain)
-- Dễ dàng mở rộng thêm nguồn dữ liệu
+- Tự động phát hiện loại từ khóa (email, phone, username, domain)
+- Tìm kiếm trên nhiều engine (file, API, web)
+- Mở rộng dễ dàng
 """
 
+import subprocess
+import sys
+import importlib
 import logging
+import os
 import re
+from typing import List, Dict, Any
+
+# ========== TỰ ĐỘNG CÀI MODULE ==========
+def install_package(package):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+def check_and_install_modules():
+    required_modules = ["telegram", "telegram.ext", "requests"]
+    for module in required_modules:
+        try:
+            if module == "telegram.ext":
+                importlib.import_module("telegram.ext")
+            else:
+                importlib.import_module(module)
+            print(f"✅ Module {module} đã có sẵn")
+        except ImportError:
+            print(f"⚠️ Module {module} chưa được cài. Đang tự động cài...")
+            try:
+                install_package(module if module != "telegram.ext" else "python-telegram-bot==20.7")
+                print(f"✅ Đã cài {module} thành công!")
+            except Exception as e:
+                print(f"❌ Lỗi: {e}")
+                sys.exit(1)
+
+print("🔍 Đang kiểm tra module...")
+check_and_install_modules()
+print("✅ Module sẵn sàng!\n")
+
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # ========== CẤU HÌNH ==========
-TOKEN = "8795044675:AAGRfrm-JCpQECIBr4orFy4KVbu-wW1-pmo"  # <--- ĐÃ THAY TOKEN CỦA BẠN
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+TOKEN = "8795044675:AAGRfrm-JCpQECIBr4orFy4KVbu-wW1-pmo"
+logging.basicConfig(level=logging.INFO)
 
-# ========== DỮ LIỆU MẪU ==========
-# Bạn có thể thay thế bằng database, API, file, v.v.
-MIX_DATA = {
-    "user": {
-        "alice": "👤 Alice - 25 tuổi - alice@example.com - SĐT: 0901234567",
-        "bob": "👤 Bob - 30 tuổi - bob@example.com - SĐT: 0912345678",
-        "carol": "👤 Carol - 22 tuổi - carol@example.com - SĐT: 0923456789",
-    },
-    "product": {
-        "laptop": "💻 Laptop Dell XPS - 25,000,000 VND",
-        "mouse": "🖱️ Chuột Logitech - 500,000 VND",
-        "keyboard": "⌨️ Bàn phím cơ - 1,200,000 VND",
-        "gmail.com": "📧 Dịch vụ Gmail của Google - Miễn phí",
-        "google.com": "🔍 Google Search Engine",
-        "facebook.com": "📱 Facebook - Mạng xã hội",
-    },
-    "document": {
-        "hopdong": "📄 Hợp đồng mẫu số 001 - Tải tại: https://example.com/hopdong.pdf",
-        "baogia": "📊 Báo giá dịch vụ 2025 - Xem file đính kèm",
-    },
-    "domain": {
-        "gmail.com": "📧 Email service",
-        "google.com": "🔍 Search engine",
-        "facebook.com": "📱 Social network",
-        "yahoo.com": "📧 Email + News",
-        "github.com": "💻 Code hosting",
-    }
-}
+# ========== CÁC ENGINE TÌM KIẾM ==========
 
-# Lưu message_id của tin nhắn "reply vào đây" theo từng user
-user_pending_search = {}
+class SearchEngine:
+    """Lớp cơ sở cho các engine tìm kiếm"""
+    def __init__(self, name: str):
+        self.name = name
+    
+    def search(self, keyword: str) -> List[str]:
+        """Trả về list kết quả tìm kiếm"""
+        return []
 
-# ========== HÀM HỖ TRỢ ==========
-def search_all(keyword: str) -> list:
-    """Tìm kiếm từ khóa trong tất cả danh mục, trả về list kết quả"""
+class FileSearchEngine(SearchEngine):
+    """Tìm kiếm trong file data.txt"""
+    def __init__(self, filepath: str = "data.txt"):
+        super().__init__("File TXT")
+        self.filepath = filepath
+        self._ensure_file()
+    
+    def _ensure_file(self):
+        if not os.path.exists(self.filepath):
+            with open(self.filepath, "w", encoding="utf-8") as f:
+                f.write("# data.txt - Mỗi dòng một bản ghi\n")
+                f.write("example@gmail.com:password123\n")
+                f.write("user@domain.com:pass456\n")
+    
+    def search(self, keyword: str) -> List[str]:
+        if not os.path.exists(self.filepath):
+            return []
+        results = []
+        keyword_lower = keyword.lower()
+        with open(self.filepath, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if keyword_lower in line.lower():
+                    results.append(line.strip())
+        return results
+
+class EmailLookupEngine(SearchEngine):
+    """Tìm kiếm thông tin email qua API công khai (ví dụ: Hunter, EmailHippo)"""
+    def __init__(self, api_key: str = None):
+        super().__init__("Email Lookup")
+        self.api_key = api_key  # Cần đăng ký API key thật
+    
+    def search(self, keyword: str) -> List[str]:
+        # Phát hiện email pattern
+        if not re.match(r'^[^@]+@[^@]+\.[^@]+$', keyword):
+            return []
+        
+        results = []
+        # Ví dụ dùng EmailHippo API (cần key thật)
+        if self.api_key:
+            try:
+                # Đây là API giả định, thay bằng endpoint thật
+                url = f"https://api.emailhippo.com/v1/verify?email={keyword}&key={self.api_key}"
+                response = requests.get(url, timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    results.append(f"📧 Email: {keyword}")
+                    results.append(f"   Status: {data.get('status', 'unknown')}")
+            except:
+                pass
+        return results
+
+class DomainSearchEngine(SearchEngine):
+    """Tìm kiếm domain (whois, DNS)"""
+    def __init__(self):
+        super().__init__("Domain")
+    
+    def search(self, keyword: str) -> List[str]:
+        # Phát hiện domain pattern
+        if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', keyword):
+            return []
+        results = []
+        # Thực hiện whois lookup (cần cài đặt whois)
+        try:
+            import subprocess
+            result = subprocess.run(['whois', keyword], capture_output=True, text=True, timeout=5)
+            lines = result.stdout.split('\n')[:10]  # Lấy 10 dòng đầu
+            results.append(f"🌐 Domain: {keyword}")
+            results.extend(lines[:5])
+        except:
+            results.append(f"🌐 Domain: {keyword} - (whois không khả dụng)")
+        return results
+
+class UsernameSearchEngine(SearchEngine):
+    """Tìm kiếm username trên mạng xã hội công khai"""
+    def __init__(self):
+        super().__init__("Username")
+        self.sites = [
+            "https://github.com/{}",
+            "https://twitter.com/{}",
+            "https://www.instagram.com/{}",
+            "https://www.reddit.com/user/{}"
+        ]
+    
+    def search(self, keyword: str) -> List[str]:
+        # Username thường không có @ hoặc khoảng trắng
+        if ' ' in keyword or '@' in keyword:
+            return []
+        results = [f"👤 Tìm kiếm username: {keyword}"]
+        for site in self.sites:
+            url = site.format(keyword)
+            try:
+                response = requests.get(url, timeout=3)
+                if response.status_code == 200:
+                    results.append(f"✅ Tồn tại: {url}")
+                else:
+                    results.append(f"❌ Không tồn tại: {url}")
+            except:
+                results.append(f"⚠️ Không kiểm tra được: {url}")
+        return results
+
+# ========== KHỞI TẠO CÁC ENGINE ==========
+engines = [
+    FileSearchEngine("data.txt"),
+    EmailLookupEngine(),  # Thêm API key nếu có
+    DomainSearchEngine(),
+    UsernameSearchEngine(),
+]
+
+# ========== HÀM TÌM KIẾM CHÍNH ==========
+def auto_search(keyword: str) -> Dict[str, List[str]]:
+    """Tự động chọn engine phù hợp và tìm kiếm"""
+    results = {}
+    
+    # Phân loại từ khóa
     keyword_lower = keyword.lower()
-    results = []
     
-    for category, data in MIX_DATA.items():
-        if keyword_lower in data:
-            results.append(f"📁 *{category.upper()}*: {data[keyword_lower]}")
+    for engine in engines:
+        # Chạy tất cả engine hoặc chỉ engine phù hợp
+        engine_results = engine.search(keyword)
+        if engine_results:
+            results[engine.name] = engine_results
     
-    # Tìm kiếm gần đúng (chứa từ khóa, không cần khớp chính xác key)
-    for category, data in MIX_DATA.items():
-        for key, value in data.items():
-            if keyword_lower in key.lower() or keyword_lower in value.lower():
-                if f"📁 *{category.upper()}*: {value}" not in results:
-                    results.append(f"🔍 *{category.upper()}* (gần đúng): {value}")
-    
+    # Nếu không engine nào có kết quả, thử tìm trong file data.txt (luôn có)
     if not results:
-        results.append(f"❌ Không tìm thấy kết quả nào cho: *{keyword}*")
+        file_engine = FileSearchEngine("data.txt")
+        file_results = file_engine.search(keyword)
+        if file_results:
+            results["File TXT"] = file_results
+        else:
+            results["Thông báo"] = [f"❌ Không tìm thấy dữ liệu nào cho: {keyword}"]
     
     return results
 
-# ========== HANDLER ==========
+# ========== TELEGRAM BOT HANDLER ==========
+user_pending_search = {}
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lệnh /start - Hiển thị menu chính"""
     keyboard = [
         [InlineKeyboardButton("🔍 TÌM KIẾM (Reply)", callback_data="search_reply")],
-        [InlineKeyboardButton("📋 Hướng dẫn", callback_data="help")],
-        [InlineKeyboardButton("ℹ️ Thông tin bot", callback_data="info")]
+        [InlineKeyboardButton("📊 Danh sách engine", callback_data="engines")],
+        [InlineKeyboardButton("ℹ️ Hướng dẫn", callback_data="help")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "🤖 *MIX DATA SEARCH BOT*\n\n"
-        "Tôi có thể tìm kiếm dữ liệu về:\n"
-        "👤 Người dùng | 💻 Sản phẩm | 📄 Tài liệu | 🌐 Domain\n\n"
-        "Hãy bấm nút bên dưới để bắt đầu!",
+        "🤖 *MIX DATA SEARCH PRO*\n\n"
+        "Bot tự động tìm kiếm dữ liệu từ nhiều nguồn:\n"
+        "📁 File TXT | 📧 Email | 🌐 Domain | 👤 Username\n\n"
+        "Hãy bấm nút bên dưới!",
         parse_mode="Markdown",
-        reply_markup=reply_markup
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý các nút bấm inline"""
     query = update.callback_query
     await query.answer()
     data = query.data
     
     if data == "search_reply":
-        # Gửi tin nhắn yêu cầu reply để nhập keyword
         msg = await query.edit_message_text(
             "🔍 *NHẬP TỪ KHÓA TÌM KIẾM*\n\n"
-            "📝 Vui lòng nhập từ khóa cần tìm:\n"
-            "Ví dụ: `gmail.com`, `google.com`, `facebook.com`, `laptop`, `alice`\n\n"
-            "⚠️ *Mẹo:* Reply tin nhắn này rồi mới ghi keyword",
+            "Reply tin nhắn này và nhập từ khóa.\n"
+            "Bot sẽ tự động phát hiện loại dữ liệu và tìm kiếm.\n\n"
+            "Ví dụ: `gmail.com`, `alice@gmail.com`, `@username`, `facebook`",
             parse_mode="Markdown"
         )
         user_pending_search[update.effective_user.id] = msg.message_id
     
+    elif data == "engines":
+        engine_list = "\n".join([f"🔹 {e.name}" for e in engines])
+        await query.edit_message_text(
+            f"📊 *CÁC ENGINE TÌM KIẾM*\n\n{engine_list}\n\n"
+            "Bot sẽ tự động chọn engine phù hợp với từ khóa.",
+            parse_mode="Markdown"
+        )
+    
     elif data == "help":
         await query.edit_message_text(
-            "📋 *HƯỚNG DẪN SỬ DỤNG*\n\n"
-            "1️⃣ Bấm nút *'TÌM KIẾM (Reply)'*\n"
-            "2️⃣ Bot sẽ gửi tin nhắn mẫu\n"
-            "3️⃣ *REPLY* vào tin nhắn đó và nhập từ khóa\n"
-            "4️⃣ Bot trả về kết quả tìm kiếm\n\n"
-            "🔎 *Từ khóa mẫu:* alice, laptop, gmail.com, hopdong\n\n"
-            "📌 Bạn có thể dùng lệnh /search bất cứ lúc nào.",
+            "📋 *HƯỚNG DẪN*\n\n"
+            "1️⃣ Bấm 'TÌM KIẾM (Reply)'\n"
+            "2️⃣ Reply tin nhắn đó và nhập từ khóa\n"
+            "3️⃣ Bot tự động tìm kiếm và trả về kết quả\n\n"
+            "*Dữ liệu mẫu:*\n"
+            "- Email: example@gmail.com\n"
+            "- Domain: google.com\n"
+            "- Username: githubuser\n\n"
+            "💾 File data.txt lưu thủ công để tìm kiếm offline.",
             parse_mode="Markdown"
         )
-    
-    elif data == "info":
-        await query.edit_message_text(
-            "ℹ️ *THÔNG TIN BOT*\n\n"
-            "🤖 Tên: MIX DATA SEARCH BOT\n"
-            "📦 Phiên bản: 1.0\n"
-            "💡 Tính năng: Tìm kiếm hỗn hợp trên nhiều nguồn dữ liệu\n"
-            "🛠️ Công nghệ: python-telegram-bot v20\n\n"
-            "Gõ /start để quay lại menu.",
-            parse_mode="Markdown"
-        )
-
-async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lệnh /search - Gửi tin nhắn yêu cầu reply (dùng khi không có menu)"""
-    msg = await update.message.reply_text(
-        "🔍 *NHẬP TỪ KHÓA TÌM KIẾM*\n\n"
-        "📝 Vui lòng nhập từ khóa cần tìm:\n"
-        "Ví dụ: gmail.com, google.com, facebook.com\n\n"
-        "⚠️ *Mẹo:* Reply tin nhắn này rồi mới ghi keyword",
-        parse_mode="Markdown"
-    )
-    user_pending_search[update.effective_user.id] = msg.message_id
 
 async def handle_reply_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý khi user reply vào tin nhắn tìm kiếm"""
     user_id = update.effective_user.id
     
-    # Kiểm tra user có đang trong trạng thái chờ tìm kiếm không
     if user_id not in user_pending_search:
         return
-    
-    # Kiểm tra có reply không và đúng message_id không
     if not update.message.reply_to_message:
         return
-    
-    replied_msg_id = update.message.reply_to_message.message_id
-    if replied_msg_id != user_pending_search[user_id]:
+    if update.message.reply_to_message.message_id != user_pending_search[user_id]:
         return
     
-    # Lấy từ khóa
     keyword = update.message.text.strip()
     if not keyword:
-        await update.message.reply_text("❌ Từ khóa không được để trống. Hãy reply lại tin nhắn và nhập keyword.")
+        await update.message.reply_text("❌ Từ khóa không được để trống.")
         return
     
-    # Xóa trạng thái chờ để tránh xử lý lại
     del user_pending_search[user_id]
     
-    # Thông báo đang tìm kiếm
-    status_msg = await update.message.reply_text(f"🔍 Đang tìm kiếm từ khóa: *{keyword}*...", parse_mode="Markdown")
+    status_msg = await update.message.reply_text(f"🔍 Đang tìm kiếm '{keyword}' trên tất cả engine...")
     
     # Thực hiện tìm kiếm
-    results = search_all(keyword)
+    results_dict = auto_search(keyword)
     
-    # Xóa tin nhắn trạng thái và gửi kết quả
     await status_msg.delete()
     
-    if len("\n".join(results)) > 4000:
-        # Nếu kết quả quá dài, chia nhỏ
-        for i in range(0, len(results), 5):
-            chunk = "\n".join(results[i:i+5])
-            await update.message.reply_text(chunk, parse_mode="Markdown")
-    else:
-        await update.message.reply_text("\n\n".join(results), parse_mode="Markdown")
+    # Gửi kết quả
+    if not results_dict:
+        await update.message.reply_text(f"❌ Không tìm thấy kết quả cho: {keyword}")
+        return
+    
+    for engine_name, engine_results in results_dict.items():
+        if engine_results:
+            msg = f"📌 *{engine_name}*:\n" + "\n".join(engine_results[:20])  # Giới hạn 20 dòng
+            if len(msg) > 4000:
+                msg = msg[:4000] + "..."
+            await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý tin nhắn không xác định"""
-    await update.message.reply_text(
-        "❓ Tôi không hiểu lệnh đó.\n"
-        "Hãy gõ /start để xem menu hoặc /search để tìm kiếm."
-    )
+    await update.message.reply_text("❓ Dùng /start để xem menu.")
 
 # ========== MAIN ==========
 def main():
-    """Khởi chạy bot"""
-    print("🚀 MIX DATA SEARCH BOT đang khởi động...")
-    
+    print("🚀 MIX DATA SEARCH PRO đang khởi động...")
     app = Application.builder().token(TOKEN).build()
-    
-    # Thêm handlers
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("search", cmd_search))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_reply_search))
-    app.add_handler(MessageHandler(filters.COMMAND, unknown))  # bắt lệnh không hợp lệ
-    
+    app.add_handler(MessageHandler(filters.COMMAND, unknown))
     print("✅ Bot đã sẵn sàng! Nhấn Ctrl+C để dừng.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
