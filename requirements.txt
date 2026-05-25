@@ -1,0 +1,10 @@
+telegram
+telethon
+edge-tts
+requests
+asyncio
+random
+datetime
+re
+glob
+os
