@@ -1,10 +1,2 @@
-telegram
-telethon
-edge-tts
+python-telegram-bot>=20.0
 requests
-asyncio
-random
-datetime
-re
-glob
-os
