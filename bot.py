@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # ========== CẤU HÌNH ==========
-TOKEN = "8795044675:AAGRfrm-JCpQECIBr4orFy4KVbu-wW1-pmo"
+TOKEN = "8659787129:AAFPGVPn7SoXji3wLnrzBWxKyzaVPERAEgk"
 DATA_FILE = "data.txt"
 logging.basicConfig(level=logging.INFO)
 
